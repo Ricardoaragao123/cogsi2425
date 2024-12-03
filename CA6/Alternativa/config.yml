@@ -1,0 +1,70 @@
+version: 2.1
+
+executors:
+  default:
+    docker:
+      - image: circleci/openjdk:17-jdk
+
+jobs:
+  checkout_code:
+    steps:
+      - checkout
+
+  build:
+    steps:
+      - checkout
+      - run:
+          name: Compile the Spring Application
+          command: ./gradlew build
+      - persist_to_workspace:
+          root: .
+          paths:
+            - build/libs/*.jar
+
+  test:
+    steps:
+      - checkout
+      - run:
+          name: Run Unit Tests
+          command: ./gradlew test
+      - store_test_results:
+          path: build/test-results/test
+
+  dockerize:
+    steps:
+      - checkout
+      - setup_remote_docker:
+          version: 20.10.17
+      - run:
+          name: Build Docker Image
+          command: docker build -t <docker-hub-username>/rest-app:$CIRCLE_SHA1 .
+      - run:
+          name: Push Docker Image to Docker Hub
+          command: |
+            echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+            docker push <docker-hub-username>/rest-app:$CIRCLE_SHA1
+
+  deploy:
+    steps:
+      - run:
+          name: Deploy Application
+          command: |
+            ansible-playbook -i inventory.yml deploy-app.yml
+
+workflows:
+  version: 2
+  build_and_deploy:
+    jobs:
+      - checkout_code
+      - build:
+          requires:
+            - checkout_code
+      - test:
+          requires:
+            - build
+      - dockerize:
+          requires:
+            - test
+      - deploy:
+          requires:
+            - dockerize
